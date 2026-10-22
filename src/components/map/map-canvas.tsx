@@ -65,6 +65,7 @@ function droneLayers(drones: Drone[], frame: number) {
       updateTriggers: {
         getPosition: frame,
         getAngle: frame,
+        getIcon: drones.length,
       },
     }),
   ];
