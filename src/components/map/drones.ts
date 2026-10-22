@@ -3,6 +3,8 @@ export type Drone = {
   longitude: number;
   latitude: number;
   heading: number;
+  turn: 1 | -1; // +1 right, -1 left
+  turnFor: number; // seconds until the turn reverses
 };
 
 const CENTER = {
@@ -11,12 +13,12 @@ const CENTER = {
 };
 
 const SEEDS = [
-  { id: "drone-1", longitude: 0, latitude: 0, heading: 0 },
-  { id: "drone-2", longitude: 0.03, latitude: 0.02, heading: 45 },
-  { id: "drone-3", longitude: -0.025, latitude: 0.03, heading: 120 },
-  { id: "drone-4", longitude: 0.02, latitude: -0.03, heading: 200 },
-  { id: "drone-5", longitude: -0.03, latitude: -0.02, heading: 300 },
-];
+  { id: "drone-1", longitude: 0, latitude: 0, heading: 0, turn: 1, turnFor: 5 },
+  { id: "drone-2", longitude: 0.03, latitude: 0.02, heading: 45, turn: -1, turnFor: 2 },
+  { id: "drone-3", longitude: -0.025, latitude: 0.03, heading: 120, turn: 1, turnFor: 4 },
+  { id: "drone-4", longitude: 0.02, latitude: -0.03, heading: 200, turn: -1, turnFor: 1 },
+  { id: "drone-5", longitude: -0.03, latitude: -0.02, heading: 300, turn: 1, turnFor: 3 },
+] as const;
 
 const DRONE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
   <path fill="white" d="M32 8 L52 52 L32 40 L12 52 Z"/>
@@ -38,6 +40,8 @@ export function createDrones(): Drone[] {
     longitude: CENTER.longitude + seed.longitude,
     latitude: CENTER.latitude + seed.latitude,
     heading: seed.heading,
+    turn: seed.turn,
+    turnFor: seed.turnFor,
   }));
 }
 
@@ -49,8 +53,9 @@ export function getDrones(): Drone[] {
 }
 
 const METERS_PER_DEGREE = 111_320;
-const SPEED_METERS_PER_SECOND = 1400;
-const TURN_DEGREES_PER_SECOND = 12;
+const SPEED_METERS_PER_SECOND = 500;
+const TURN_DEGREES_PER_SECOND = 8;
+const TURN_HOLD_SECONDS = 5;
 
 export function stepDrones(drones: Drone[], dtSeconds: number) {
   const meters = SPEED_METERS_PER_SECOND * dtSeconds;
@@ -63,6 +68,11 @@ export function stepDrones(drones: Drone[], dtSeconds: number) {
     drone.longitude +=
       (Math.sin(heading) * meters) /
       (METERS_PER_DEGREE * Math.cos(latitude));
-    drone.heading = (drone.heading + turn) % 360;
+    drone.heading = (drone.heading + drone.turn * turn + 360) % 360;
+    drone.turnFor -= dtSeconds;
+    if (drone.turnFor <= 0) {
+      drone.turn = drone.turn === 1 ? -1 : 1;
+      drone.turnFor += TURN_HOLD_SECONDS;
+    }
   }
 }

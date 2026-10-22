@@ -31,7 +31,7 @@ function droneLayer(drones: Drone[], frame: number) {
     id: "drones",
     data: drones,
     getPosition: (drone) => [drone.longitude, drone.latitude],
-    getAngle: (drone) => drone.heading,
+        getAngle: (drone) => -drone.heading,
     getIcon: () => droneIcon,
     getSize: 48,
     getColor: [255, 176, 32],
