@@ -1,24 +1,13 @@
-export type Drone = {
+export type Telemetry = {
   id: string;
   longitude: number;
   latitude: number;
   heading: number;
-  turn: 1 | -1; // +1 right, -1 left
-  turnFor: number; // seconds until the turn reverses
 };
 
-const CENTER = {
-  longitude: -117.918031,
-  latitude: 33.693477,
+export type Drone = Telemetry & {
+  path: [number, number][]; // recent positions, oldest first
 };
-
-const SEEDS = [
-  { id: "drone-1", longitude: 0, latitude: 0, heading: 0, turn: 1, turnFor: 5 },
-  { id: "drone-2", longitude: 0.03, latitude: 0.02, heading: 45, turn: -1, turnFor: 2 },
-  { id: "drone-3", longitude: -0.025, latitude: 0.03, heading: 120, turn: 1, turnFor: 4 },
-  { id: "drone-4", longitude: 0.02, latitude: -0.03, heading: 200, turn: -1, turnFor: 1 },
-  { id: "drone-5", longitude: -0.03, latitude: -0.02, heading: 300, turn: 1, turnFor: 3 },
-] as const;
 
 const DRONE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
   <path fill="white" d="M32 8 L52 52 L32 40 L12 52 Z"/>
@@ -34,45 +23,30 @@ export const droneIcon = {
   mask: true,
 };
 
-export function createDrones(): Drone[] {
-  return SEEDS.map((seed) => ({
-    id: seed.id,
-    longitude: CENTER.longitude + seed.longitude,
-    latitude: CENTER.latitude + seed.latitude,
-    heading: seed.heading,
-    turn: seed.turn,
-    turnFor: seed.turnFor,
-  }));
-}
+const PATH_LENGTH = 160; // about 8 seconds of 50ms updates
 
-let droneList: Drone[] | undefined;
+const drones: Drone[] = [];
 
 export function getDrones(): Drone[] {
-  droneList ??= createDrones();
-  return droneList;
+  return drones;
 }
 
-const METERS_PER_DEGREE = 111_320;
-const SPEED_METERS_PER_SECOND = 500;
-const TURN_DEGREES_PER_SECOND = 8;
-const TURN_HOLD_SECONDS = 5;
+export function applyTelemetry(drones: Drone[], samples: Telemetry[]) {
+  const byId = new Map(drones.map((drone) => [drone.id, drone]));
 
-export function stepDrones(drones: Drone[], dtSeconds: number) {
-  const meters = SPEED_METERS_PER_SECOND * dtSeconds;
-  const turn = TURN_DEGREES_PER_SECOND * dtSeconds;
-
-  for (const drone of drones) {
-    const heading = (drone.heading * Math.PI) / 180;
-    const latitude = (drone.latitude * Math.PI) / 180;
-    drone.latitude += (Math.cos(heading) * meters) / METERS_PER_DEGREE;
-    drone.longitude +=
-      (Math.sin(heading) * meters) /
-      (METERS_PER_DEGREE * Math.cos(latitude));
-    drone.heading = (drone.heading + drone.turn * turn + 360) % 360;
-    drone.turnFor -= dtSeconds;
-    if (drone.turnFor <= 0) {
-      drone.turn = drone.turn === 1 ? -1 : 1;
-      drone.turnFor += TURN_HOLD_SECONDS;
+  for (const sample of samples) {
+    const position: [number, number] = [sample.longitude, sample.latitude];
+    const drone = byId.get(sample.id);
+    if (!drone) {
+      const created: Drone = { ...sample, path: [position] };
+      drones.push(created);
+      byId.set(sample.id, created);
+      continue;
     }
+    drone.longitude = sample.longitude;
+    drone.latitude = sample.latitude;
+    drone.heading = sample.heading;
+    drone.path.push(position);
+    if (drone.path.length > PATH_LENGTH) drone.path.shift();
   }
 }

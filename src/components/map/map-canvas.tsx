@@ -2,12 +2,19 @@
 
 import { useEffect, useMemo, useRef } from "react";
 import DeckGL, { type DeckGLRef } from "@deck.gl/react";
-import { IconLayer } from "@deck.gl/layers";
+import { IconLayer, PathLayer } from "@deck.gl/layers";
 import { setWorkerUrl } from "maplibre-gl";
 import { Map } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map.css";
-import { droneIcon, getDrones, stepDrones, type Drone } from "./drones";
+import { io } from "socket.io-client";
+import {
+  applyTelemetry,
+  droneIcon,
+  getDrones,
+  type Drone,
+  type Telemetry,
+} from "./drones";
 
 // Turbopack rewrites MapLibre's default worker path. Point at the real bundle.
 const workerUrl = new URL(
@@ -25,48 +32,67 @@ const INITIAL_VIEW_STATE = {
 };
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
+const API_HOST = process.env.NEXT_PUBLIC_API_HOST;
 
-function droneLayer(drones: Drone[], frame: number) {
-  return new IconLayer<Drone>({
-    id: "drones",
-    data: drones,
-    getPosition: (drone) => [drone.longitude, drone.latitude],
-        getAngle: (drone) => -drone.heading,
-    getIcon: () => droneIcon,
-    getSize: 48,
-    getColor: [255, 176, 32],
-    sizeUnits: "pixels",
-    updateTriggers: {
-      getPosition: frame,
-      getAngle: frame,
-    },
-  });
+if (!API_HOST) {
+  throw new Error("NEXT_PUBLIC_API_HOST is not set");
+}
+
+function droneLayers(drones: Drone[], frame: number) {
+  return [
+    new PathLayer<Drone>({
+      id: "paths",
+      data: drones,
+      getPath: (drone) => drone.path,
+      getColor: [255, 176, 32, 160],
+      getWidth: 2,
+      widthUnits: "pixels",
+      widthMinPixels: 2,
+      jointRounded: true,
+      capRounded: true,
+      billboard: true,
+      updateTriggers: { getPath: frame },
+    }),
+    new IconLayer<Drone>({
+      id: "drones",
+      data: drones,
+      getPosition: (drone) => [drone.longitude, drone.latitude],
+      getAngle: (drone) => -drone.heading,
+      getIcon: () => droneIcon,
+      getSize: 48,
+      getColor: [255, 176, 32],
+      sizeUnits: "pixels",
+      updateTriggers: {
+        getPosition: frame,
+        getAngle: frame,
+      },
+    }),
+  ];
 }
 
 export default function MapCanvas() {
   const deckRef = useRef<DeckGLRef>(null);
   const dronesRef = useRef(getDrones());
 
-  const layers = useMemo(() => [droneLayer(getDrones(), 0)], []);
+  const layers = useMemo(() => droneLayers(getDrones(), 0), []);
 
   useEffect(() => {
     let frame = 0;
-    let last = performance.now();
-    let raf = 0;
+    const socket = io(API_HOST);
 
-    const tick = (now: number) => {
-      const dt = Math.min((now - last) / 1000, 0.05);
-      last = now;
-      stepDrones(dronesRef.current, dt);
+    const onTelemetry = (samples: Telemetry[]) => {
+      applyTelemetry(dronesRef.current, samples);
       frame += 1;
       deckRef.current?.deck?.setProps({
-        layers: [droneLayer(dronesRef.current, frame)],
+        layers: droneLayers(dronesRef.current, frame),
       });
-      raf = requestAnimationFrame(tick);
     };
 
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
+    socket.on("telemetry", onTelemetry);
+    return () => {
+      socket.off("telemetry", onTelemetry);
+      socket.close();
+    };
   }, []);
 
   return (
