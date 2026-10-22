@@ -47,3 +47,22 @@ export function getDrones(): Drone[] {
   droneList ??= createDrones();
   return droneList;
 }
+
+const METERS_PER_DEGREE = 111_320;
+const SPEED_METERS_PER_SECOND = 1400;
+const TURN_DEGREES_PER_SECOND = 12;
+
+export function stepDrones(drones: Drone[], dtSeconds: number) {
+  const meters = SPEED_METERS_PER_SECOND * dtSeconds;
+  const turn = TURN_DEGREES_PER_SECOND * dtSeconds;
+
+  for (const drone of drones) {
+    const heading = (drone.heading * Math.PI) / 180;
+    const latitude = (drone.latitude * Math.PI) / 180;
+    drone.latitude += (Math.cos(heading) * meters) / METERS_PER_DEGREE;
+    drone.longitude +=
+      (Math.sin(heading) * meters) /
+      (METERS_PER_DEGREE * Math.cos(latitude));
+    drone.heading = (drone.heading + turn) % 360;
+  }
+}

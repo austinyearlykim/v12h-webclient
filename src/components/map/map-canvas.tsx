@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useRef } from "react";
-import DeckGL from "@deck.gl/react";
+import { useEffect, useMemo, useRef } from "react";
+import DeckGL, { type DeckGLRef } from "@deck.gl/react";
 import { IconLayer } from "@deck.gl/layers";
 import { setWorkerUrl } from "maplibre-gl";
 import { Map } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "./map.css";
-import { droneIcon, getDrones, type Drone } from "./drones";
+import { droneIcon, getDrones, stepDrones, type Drone } from "./drones";
 
 // Turbopack rewrites MapLibre's default worker path. Point at the real bundle.
 const workerUrl = new URL(
@@ -26,29 +26,56 @@ const INITIAL_VIEW_STATE = {
 
 const MAP_STYLE = "https://tiles.openfreemap.org/styles/dark";
 
+function droneLayer(drones: Drone[], frame: number) {
+  return new IconLayer<Drone>({
+    id: "drones",
+    data: drones,
+    getPosition: (drone) => [drone.longitude, drone.latitude],
+    getAngle: (drone) => drone.heading,
+    getIcon: () => droneIcon,
+    getSize: 48,
+    getColor: [255, 176, 32],
+    sizeUnits: "pixels",
+    updateTriggers: {
+      getPosition: frame,
+      getAngle: frame,
+    },
+  });
+}
+
 export default function MapCanvas() {
-  // Same array the layer draws. The frame loop will update it in place.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- read by the frame loop
+  const deckRef = useRef<DeckGLRef>(null);
   const dronesRef = useRef(getDrones());
 
-  const layers = useMemo(
-    () => [
-      new IconLayer<Drone>({
-        id: "drones",
-        data: getDrones(),
-        getPosition: (drone) => [drone.longitude, drone.latitude],
-        getAngle: (drone) => drone.heading,
-        getIcon: () => droneIcon,
-        getSize: 48,
-        getColor: [255, 176, 32],
-        sizeUnits: "pixels",
-      }),
-    ],
-    [],
-  );
+  const layers = useMemo(() => [droneLayer(getDrones(), 0)], []);
+
+  useEffect(() => {
+    let frame = 0;
+    let last = performance.now();
+    let raf = 0;
+
+    const tick = (now: number) => {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      stepDrones(dronesRef.current, dt);
+      frame += 1;
+      deckRef.current?.deck?.setProps({
+        layers: [droneLayer(dronesRef.current, frame)],
+      });
+      raf = requestAnimationFrame(tick);
+    };
+
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   return (
-    <DeckGL initialViewState={INITIAL_VIEW_STATE} controller layers={layers}>
+    <DeckGL
+      ref={deckRef}
+      initialViewState={INITIAL_VIEW_STATE}
+      controller
+      layers={layers}
+    >
       <Map mapStyle={MAP_STYLE} />
     </DeckGL>
   );
