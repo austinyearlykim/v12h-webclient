@@ -1,5 +1,6 @@
 export type Telemetry = {
   id: string;
+  name: string;
   longitude: number;
   latitude: number;
   heading: number;
@@ -43,6 +44,7 @@ export function applyTelemetry(drones: Drone[], samples: Telemetry[]) {
       byId.set(sample.id, created);
       continue;
     }
+    drone.name = sample.name;
     drone.longitude = sample.longitude;
     drone.latitude = sample.latitude;
     drone.heading = sample.heading;

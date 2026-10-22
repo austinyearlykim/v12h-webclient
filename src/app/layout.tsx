@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Footer } from "@/components/footer";
 import { Header } from "@/components/header";
 import "./globals.css";
 
@@ -13,6 +14,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
         <Header title="LatticeWeb" />
         {children}
+        <Footer />
       </body>
     </html>
   );
