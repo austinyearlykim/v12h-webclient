@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { subscribeRoster, type DroneRoster } from "@/components/map/roster";
 import { selectDrone, subscribeSelection } from "@/components/map/selection";
 
@@ -11,9 +12,14 @@ const STATUS_TONE: Record<DroneRoster["status"], { pill: string; bar: string }> 
 };
 
 export function Footer() {
-  const [open, setOpen] = useState(true);
+  const pathname = usePathname();
+  const [open, setOpen] = useState(pathname === "/");
   const [roster, setRoster] = useState<DroneRoster[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOpen(pathname === "/");
+  }, [pathname]);
 
   useEffect(() => subscribeRoster(setRoster), []);
   useEffect(

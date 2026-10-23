@@ -10,7 +10,7 @@ export function Header({ title }: HeaderProps) {
       <h1 className="font-medium tracking-wide">
         <Link href="/">{title}</Link>
       </h1>
-      <Link href="/how">How was this made?</Link>
+      <Link href="/how">How does this work?</Link>
     </header>
   );
 }

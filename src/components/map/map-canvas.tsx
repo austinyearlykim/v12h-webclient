@@ -76,8 +76,8 @@ const ORIGIN_ICON = {
   mask: true,
 };
 
-// One layer for the life of the page. Rebuilding a scatterplot while the
-// camera scale is mid-drag collapses the disc for a frame.
+// Kept for one visit to the map. A new scatterplot each frame collapses
+// during a drag, and a layer deck already finalized cannot be shown again.
 let originLayer: IconLayer<Origin> | null = null;
 let originLayerPoint: Origin | null = null;
 
@@ -288,29 +288,64 @@ export default function MapCanvas() {
     };
     raf = requestAnimationFrame(tick);
 
-    const socket = io(API_HOST);
-    let latencyPending = false;
+    let socket: ReturnType<typeof io> | null = null;
+    let cancelled = false;
+    let latencyTimer = 0;
 
-    const measureLatency = () => {
-      if (!socket.connected || latencyPending) return;
-      latencyPending = true;
-      const start = performance.now();
-      socket.timeout(1000).emit("latency", (error: Error | null) => {
-        latencyPending = false;
-        if (error || !socket.connected) {
-          publishConnection({ status: socket.connected ? "connected" : "disconnected", ping: null });
-          return;
+    const connect = async () => {
+      let token: string | null = null;
+      try {
+        const response = await fetch("/api/telemetry-token");
+        if (response.ok) {
+          const body = (await response.json()) as { token?: string | null };
+          token = body.token ?? null;
         }
-        publishConnection({ status: "connected", ping: Math.round(performance.now() - start) });
-      });
+      } catch {
+        token = null;
+      }
+      if (cancelled) return;
+      if (!token) {
+        publishConnection({ status: "disconnected", ping: null });
+        return;
+      }
+
+      const next = io(API_HOST, { auth: { token } });
+      if (cancelled) {
+        next.close();
+        return;
+      }
+      socket = next;
+      let latencyPending = false;
+
+      const measureLatency = () => {
+        if (!socket?.connected || latencyPending) return;
+        latencyPending = true;
+        const start = performance.now();
+        socket.timeout(1000).emit("latency", (error: Error | null) => {
+          latencyPending = false;
+          if (error || !socket?.connected) {
+            publishConnection({ status: socket?.connected ? "connected" : "disconnected", ping: null });
+            return;
+          }
+          publishConnection({ status: "connected", ping: Math.round(performance.now() - start) });
+        });
+      };
+
+      const onConnect = () => {
+        publishConnection({ status: "connected", ping: null });
+        measureLatency();
+      };
+      const onDisconnect = () => publishConnection({ status: "disconnected", ping: null });
+      const onReconnect = () => publishConnection({ status: "reconnecting", ping: null });
+
+      socket.on("connect", onConnect);
+      socket.on("disconnect", onDisconnect);
+      socket.io.on("reconnect_attempt", onReconnect);
+      socket.on("telemetry", onTelemetry);
+      latencyTimer = window.setInterval(measureLatency, 1000);
     };
 
-    const onConnect = () => {
-      publishConnection({ status: "connected", ping: null });
-      measureLatency();
-    };
-    const onDisconnect = () => publishConnection({ status: "disconnected", ping: null });
-    const onReconnect = () => publishConnection({ status: "reconnecting", ping: null });
+    void connect();
 
     const onTelemetry = (frame: TelemetryFrame) => {
       applyTelemetry(dronesRef.current, frame);
@@ -347,24 +382,18 @@ export default function MapCanvas() {
     window.addEventListener("pointerup", releaseDrag);
     window.addEventListener("pointercancel", releaseDrag);
 
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.io.on("reconnect_attempt", onReconnect);
-    socket.on("telemetry", onTelemetry);
-    const latencyTimer = window.setInterval(measureLatency, 1000);
     return () => {
+      cancelled = true;
       cancelAnimationFrame(raf);
       unsubscribe();
       window.clearInterval(latencyTimer);
       window.removeEventListener("pointerup", releaseDrag);
       window.removeEventListener("pointercancel", releaseDrag);
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.io.off("reconnect_attempt", onReconnect);
-      socket.off("telemetry", onTelemetry);
-      socket.close();
+      socket?.close();
       publishRoster([]);
       publishConnection({ status: "disconnected", ping: null });
+      originLayer = null;
+      originLayerPoint = null;
     };
   }, [camera]);
 
