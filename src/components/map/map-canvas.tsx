@@ -12,9 +12,13 @@ import {
   applyTelemetry,
   droneIcon,
   getDrones,
+  getOrigin,
   type Drone,
-  type Telemetry,
+  type Origin,
+  type TelemetryFrame,
 } from "./drones";
+import { publishConnection } from "./connection";
+import { hideOrigin, showOrigin } from "./origin-panel";
 import { publishRoster } from "./roster";
 import { selectDrone, subscribeSelection } from "./selection";
 
@@ -28,7 +32,7 @@ setWorkerUrl(workerUrl.href);
 const INITIAL_VIEW_STATE = {
   longitude: -117.918031,
   latitude: 33.693477,
-  zoom: 11,
+  zoom: 13,
   pitch: 0,
   bearing: 0,
 };
@@ -56,7 +60,61 @@ if (!API_HOST) {
 }
 
 const ORANGE: [number, number, number] = [255, 176, 32];
+const ORIGIN_BLUE: [number, number, number, number] = [37, 99, 235, 230];
 const ICON_SIZE = 48;
+const ORIGIN_SIZE = 20;
+
+const ORIGIN_ICON = {
+  id: "origin",
+  url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="white"/></svg>`,
+  )}`,
+  width: 64,
+  height: 64,
+  anchorX: 32,
+  anchorY: 32,
+  mask: true,
+};
+
+// One layer for the life of the page. Rebuilding a scatterplot while the
+// camera scale is mid-drag collapses the disc for a frame.
+let originLayer: IconLayer<Origin> | null = null;
+let originLayerPoint: Origin | null = null;
+
+function getOriginLayer(origin: Origin | null) {
+  if (
+    originLayer &&
+    originLayerPoint?.longitude === origin?.longitude &&
+    originLayerPoint?.latitude === origin?.latitude
+  ) {
+    return originLayer;
+  }
+  originLayerPoint = origin;
+  originLayer = new IconLayer<Origin>({
+    id: "origin",
+    data: origin ? [origin] : [],
+    getPosition: (point) => [point.longitude, point.latitude],
+    getIcon: () => ORIGIN_ICON,
+    getSize: ORIGIN_SIZE,
+    getColor: ORIGIN_BLUE,
+    sizeUnits: "pixels",
+  });
+  return originLayer;
+}
+
+function originAtClick(
+  x: number,
+  y: number,
+  project: (lngLat: [number, number]) => [number, number],
+) {
+  const origin = getOrigin();
+  if (!origin) return null;
+  const [originX, originY] = project([origin.longitude, origin.latitude]);
+  const dx = originX - x;
+  const dy = originY - y;
+  const radius = ORIGIN_SIZE / 2 + 6;
+  return dx * dx + dy * dy <= radius * radius ? origin : null;
+}
 
 function droneAtClick(
   x: number,
@@ -93,6 +151,7 @@ function droneLayers(drones: Drone[], frame: number, followed: Fix | null) {
     followed && drone.id === followed.id ? followed.heading : drone.heading;
 
   return [
+    getOriginLayer(getOrigin()),
     new PathLayer<Drone>({
       id: "paths",
       data: drones,
@@ -228,13 +287,37 @@ export default function MapCanvas() {
     raf = requestAnimationFrame(tick);
 
     const socket = io(API_HOST);
+    let latencyPending = false;
 
-    const onTelemetry = (samples: Telemetry[]) => {
-      applyTelemetry(dronesRef.current, samples);
+    const measureLatency = () => {
+      if (!socket.connected || latencyPending) return;
+      latencyPending = true;
+      const start = performance.now();
+      socket.timeout(1000).emit("latency", (error: Error | null) => {
+        latencyPending = false;
+        if (error || !socket.connected) {
+          publishConnection({ status: socket.connected ? "connected" : "disconnected", ping: null });
+          return;
+        }
+        publishConnection({ status: "connected", ping: Math.round(performance.now() - start) });
+      });
+    };
+
+    const onConnect = () => {
+      publishConnection({ status: "connected", ping: null });
+      measureLatency();
+    };
+    const onDisconnect = () => publishConnection({ status: "disconnected", ping: null });
+    const onReconnect = () => publishConnection({ status: "reconnecting", ping: null });
+
+    const onTelemetry = (frame: TelemetryFrame) => {
+      applyTelemetry(dronesRef.current, frame);
       publishRoster(
         dronesRef.current.map((drone) => ({
           id: drone.id,
           name: drone.name,
+          battery: drone.battery,
+          status: drone.status,
         })),
       );
       const selected = dronesRef.current.find((drone) => drone.id === selectedRef.current);
@@ -262,15 +345,24 @@ export default function MapCanvas() {
     window.addEventListener("pointerup", releaseDrag);
     window.addEventListener("pointercancel", releaseDrag);
 
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.io.on("reconnect_attempt", onReconnect);
     socket.on("telemetry", onTelemetry);
+    const latencyTimer = window.setInterval(measureLatency, 1000);
     return () => {
       cancelAnimationFrame(raf);
       unsubscribe();
+      window.clearInterval(latencyTimer);
       window.removeEventListener("pointerup", releaseDrag);
       window.removeEventListener("pointercancel", releaseDrag);
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.io.off("reconnect_attempt", onReconnect);
       socket.off("telemetry", onTelemetry);
       socket.close();
       publishRoster([]);
+      publishConnection({ status: "disconnected", ping: null });
     };
   }, [camera]);
 
@@ -292,7 +384,14 @@ export default function MapCanvas() {
               return;
             }
             if (!viewport) return;
-            const drone = droneAtClick(info.x, info.y, viewport.project.bind(viewport), shownRef.current);
+            const project = viewport.project.bind(viewport);
+            const origin = originAtClick(info.x, info.y, project);
+            if (origin) {
+              showOrigin(origin);
+              return;
+            }
+            hideOrigin();
+            const drone = droneAtClick(info.x, info.y, project, shownRef.current);
             selectDrone(drone ? drone.id : null);
           }}
           onInteractionStateChange={(state) => {

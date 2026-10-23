@@ -1,6 +1,8 @@
 export type DroneRoster = {
   id: string;
   name: string;
+  battery: number;
+  status: "Patrolling" | "RTB" | "Charging";
 };
 
 let roster: DroneRoster[] = [];
@@ -11,7 +13,10 @@ export function publishRoster(next: DroneRoster[]) {
     roster.length === next.length &&
     roster.every(
       (drone, index) =>
-        drone.id === next[index].id && drone.name === next[index].name,
+        drone.id === next[index].id &&
+        drone.name === next[index].name &&
+        drone.battery === next[index].battery &&
+        drone.status === next[index].status,
     )
   ) {
     return;

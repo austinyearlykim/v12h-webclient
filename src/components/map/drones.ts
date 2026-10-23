@@ -4,6 +4,20 @@ export type Telemetry = {
   longitude: number;
   latitude: number;
   heading: number;
+  battery: number;
+  status: "Patrolling" | "RTB" | "Charging";
+};
+
+export type Origin = {
+  name: string;
+  place: string;
+  longitude: number;
+  latitude: number;
+};
+
+export type TelemetryFrame = {
+  origin: Origin;
+  drones: Telemetry[];
 };
 
 export type Drone = Telemetry & {
@@ -27,15 +41,21 @@ export const droneIcon = {
 const PATH_LENGTH = 160; // about 8 seconds of 50ms updates
 
 const drones: Drone[] = [];
+let origin: Origin | null = null;
 
 export function getDrones(): Drone[] {
   return drones;
 }
 
-export function applyTelemetry(drones: Drone[], samples: Telemetry[]) {
+export function getOrigin(): Origin | null {
+  return origin;
+}
+
+export function applyTelemetry(drones: Drone[], frame: TelemetryFrame) {
+  origin = frame.origin;
   const byId = new Map(drones.map((drone) => [drone.id, drone]));
 
-  for (const sample of samples) {
+  for (const sample of frame.drones) {
     const position: [number, number] = [sample.longitude, sample.latitude];
     const drone = byId.get(sample.id);
     if (!drone) {
@@ -45,6 +65,8 @@ export function applyTelemetry(drones: Drone[], samples: Telemetry[]) {
       continue;
     }
     drone.name = sample.name;
+    drone.battery = sample.battery;
+    drone.status = sample.status;
     drone.longitude = sample.longitude;
     drone.latitude = sample.latitude;
     drone.heading = sample.heading;
