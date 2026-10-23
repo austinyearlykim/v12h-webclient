@@ -143,7 +143,7 @@ function droneAtClick(
 }
 
 function droneLayers(drones: Drone[], frame: number, followed: Fix | null) {
-  const place = (drone: Drone) =>
+  const place = (drone: Drone): [number, number] =>
     followed && drone.id === followed.id
       ? [followed.longitude, followed.latitude]
       : [drone.longitude, drone.latitude];
@@ -260,19 +260,21 @@ export default function MapCanvas() {
       if (!deck) return;
       frame += 1;
       shownRef.current = followed;
-      const props: { layers: ReturnType<typeof droneLayers>; initialViewState?: object } = {
-        layers: droneLayers(dronesRef.current, frame, followed),
-      };
+      const layers = droneLayers(dronesRef.current, frame, followed);
       if (followed && !interactingRef.current) {
-        props.initialViewState = {
-          longitude: followed.longitude,
-          latitude: followed.latitude,
-          zoom: camera.zoom,
-          pitch: camera.pitch,
-          bearing: camera.bearing,
-        };
+        deck.setProps({
+          layers,
+          initialViewState: {
+            longitude: followed.longitude,
+            latitude: followed.latitude,
+            zoom: camera.zoom,
+            pitch: camera.pitch,
+            bearing: camera.bearing,
+          },
+        });
+      } else {
+        deck.setProps({ layers });
       }
-      deck.setProps(props);
       if (followed && !interactingRef.current) {
         camera.longitude = followed.longitude;
         camera.latitude = followed.latitude;
@@ -384,7 +386,10 @@ export default function MapCanvas() {
               return;
             }
             if (!viewport) return;
-            const project = viewport.project.bind(viewport);
+            const project = (lngLat: [number, number]): [number, number] => {
+              const [px, py] = viewport.project(lngLat);
+              return [px, py];
+            };
             const origin = originAtClick(info.x, info.y, project);
             if (origin) {
               showOrigin(origin);
