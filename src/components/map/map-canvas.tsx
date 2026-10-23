@@ -14,10 +14,10 @@ import {
   getDrones,
   getOrigin,
   type Drone,
-  type Origin,
   type TelemetryFrame,
 } from "./drones";
 import { publishConnection } from "./connection";
+import { getFleetSize, subscribeFleetSize } from "./fleet";
 import { hideOrigin, showOrigin } from "./origin-panel";
 import { publishRoster } from "./roster";
 import { selectDrone, subscribeSelection } from "./selection";
@@ -60,47 +60,8 @@ if (!API_HOST) {
 }
 
 const ORANGE: [number, number, number] = [255, 176, 32];
-const ORIGIN_BLUE: [number, number, number, number] = [37, 99, 235, 230];
 const ICON_SIZE = 48;
 const ORIGIN_SIZE = 20;
-
-const ORIGIN_ICON = {
-  id: "origin",
-  url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
-    `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="white"/></svg>`,
-  )}`,
-  width: 64,
-  height: 64,
-  anchorX: 32,
-  anchorY: 32,
-  mask: true,
-};
-
-// Kept for one visit to the map. A new scatterplot each frame collapses
-// during a drag, and a layer deck already finalized cannot be shown again.
-let originLayer: IconLayer<Origin> | null = null;
-let originLayerPoint: Origin | null = null;
-
-function getOriginLayer(origin: Origin | null) {
-  if (
-    originLayer &&
-    originLayerPoint?.longitude === origin?.longitude &&
-    originLayerPoint?.latitude === origin?.latitude
-  ) {
-    return originLayer;
-  }
-  originLayerPoint = origin;
-  originLayer = new IconLayer<Origin>({
-    id: "origin",
-    data: origin ? [origin] : [],
-    getPosition: (point) => [point.longitude, point.latitude],
-    getIcon: () => ORIGIN_ICON,
-    getSize: ORIGIN_SIZE,
-    getColor: ORIGIN_BLUE,
-    sizeUnits: "pixels",
-  });
-  return originLayer;
-}
 
 function originAtClick(
   x: number,
@@ -151,7 +112,6 @@ function droneLayers(drones: Drone[], frame: number, followed: Fix | null) {
     followed && drone.id === followed.id ? followed.heading : drone.heading;
 
   return [
-    getOriginLayer(getOrigin()),
     new PathLayer<Drone>({
       id: "paths",
       data: drones,
@@ -197,6 +157,29 @@ export default function MapCanvas() {
 
   const boundsRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<HTMLDivElement>(null);
+  const originMarkRef = useRef<HTMLDivElement>(null);
+
+  const placeOrigin = () => {
+    const mark = originMarkRef.current;
+    const deck = deckRef.current?.deck;
+    if (!mark || !deck) return;
+    const origin = getOrigin();
+    if (!origin) {
+      mark.style.opacity = "0";
+      return;
+    }
+    let viewport;
+    try {
+      viewport = deck.getViewports()[0];
+    } catch {
+      return;
+    }
+    if (!viewport) return;
+    const [x, y] = viewport.project([origin.longitude, origin.latitude]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    mark.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
+    mark.style.opacity = "1";
+  };
 
   // MapLibre flips tiles by a pixel when the width or height is odd and the
   // camera sits on a pixel boundary. An even size never takes that branch.
@@ -334,6 +317,7 @@ export default function MapCanvas() {
       const onConnect = () => {
         publishConnection({ status: "connected", ping: null });
         measureLatency();
+        socket?.emit("fleet", getFleetSize());
       };
       const onDisconnect = () => publishConnection({ status: "disconnected", ping: null });
       const onReconnect = () => publishConnection({ status: "reconnecting", ping: null });
@@ -358,6 +342,10 @@ export default function MapCanvas() {
         })),
       );
       const selected = dronesRef.current.find((drone) => drone.id === selectedRef.current);
+      if (selectedRef.current && !selected) {
+        selectDrone(null);
+        return;
+      }
       if (selected) note(selected);
       else draw(null);
     };
@@ -376,6 +364,10 @@ export default function MapCanvas() {
       }
     });
 
+    const unsubscribeFleet = subscribeFleetSize(() => {
+      socket?.emit("fleet", getFleetSize());
+    });
+
     const releaseDrag = () => {
       interactingRef.current = false;
     };
@@ -386,14 +378,13 @@ export default function MapCanvas() {
       cancelled = true;
       cancelAnimationFrame(raf);
       unsubscribe();
+      unsubscribeFleet();
       window.clearInterval(latencyTimer);
       window.removeEventListener("pointerup", releaseDrag);
       window.removeEventListener("pointercancel", releaseDrag);
       socket?.close();
       publishRoster([]);
       publishConnection({ status: "disconnected", ping: null });
-      originLayer = null;
-      originLayerPoint = null;
     };
   }, [camera]);
 
@@ -442,9 +433,14 @@ export default function MapCanvas() {
             }
             if (zoom !== viewState.zoom) return { ...viewState, zoom };
           }}
+          onAfterRender={placeOrigin}
         >
           <Map mapStyle={MAP_STYLE} />
         </DeckGL>
+        <div
+          ref={originMarkRef}
+          className="pointer-events-none absolute top-0 left-0 z-10 size-[15px] rounded-full bg-[rgba(37,99,235,0.9)] opacity-0"
+        />
       </div>
     </div>
   );

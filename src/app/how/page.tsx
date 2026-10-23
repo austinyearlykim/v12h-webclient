@@ -52,6 +52,9 @@ export default function How() {
             LatticeWeb is a web application that displays the telemetry data of a fleet of drones.
             It tracks a roster of drones and their current status.
           </p>
+          <p className="w-fit max-w-full rounded-md border border-amber-400/40 bg-neutral-900 px-3 py-2 text-sm leading-6 text-neutral-100 shadow-lg shadow-black/40">
+            The drones are not generated on the webclient. LatticeWeb is connected to a server via a websocket connection.
+          </p>
           <p className="text-sm leading-6 text-neutral-400">
             The drones are represented as arrows on a map and their paths are drawn as lines.
           </p>
@@ -77,6 +80,9 @@ export default function How() {
               ))}
             </tbody>
           </table>
+          <p className="text-sm leading-6 text-neutral-400">
+            While a drone is patrolling or returning to base, its battery drains at 1% per second.
+          </p>
           <p className="text-sm leading-6 text-neutral-400">
             The drones are selectable and clicking on them will have the camera follow them.
           </p>

@@ -54,8 +54,10 @@ export function getOrigin(): Origin | null {
 export function applyTelemetry(drones: Drone[], frame: TelemetryFrame) {
   origin = frame.origin;
   const byId = new Map(drones.map((drone) => [drone.id, drone]));
+  const seen = new Set<string>();
 
   for (const sample of frame.drones) {
+    seen.add(sample.id);
     const position: [number, number] = [sample.longitude, sample.latitude];
     const drone = byId.get(sample.id);
     if (!drone) {
@@ -72,5 +74,9 @@ export function applyTelemetry(drones: Drone[], frame: TelemetryFrame) {
     drone.heading = sample.heading;
     drone.path.push(position);
     if (drone.path.length > PATH_LENGTH) drone.path.shift();
+  }
+
+  for (let index = drones.length - 1; index >= 0; index -= 1) {
+    if (!seen.has(drones[index].id)) drones.splice(index, 1);
   }
 }
