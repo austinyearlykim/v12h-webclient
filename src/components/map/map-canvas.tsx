@@ -17,7 +17,7 @@ import {
   type TelemetryFrame,
 } from "./drones";
 import { publishConnection } from "./connection";
-import { getFleetSize, subscribeFleetSize } from "./fleet";
+import { getFleetSize, isFleetSize, noteFleetSize, subscribeFleetIntent } from "./fleet";
 import { hideOrigin, showOrigin } from "./origin-panel";
 import { publishRoster } from "./roster";
 import { selectDrone, subscribeSelection } from "./selection";
@@ -332,6 +332,7 @@ export default function MapCanvas() {
     void connect();
 
     const onTelemetry = (frame: TelemetryFrame) => {
+      if (isFleetSize(frame.drones.length)) noteFleetSize(frame.drones.length);
       applyTelemetry(dronesRef.current, frame);
       publishRoster(
         dronesRef.current.map((drone) => ({
@@ -364,7 +365,7 @@ export default function MapCanvas() {
       }
     });
 
-    const unsubscribeFleet = subscribeFleetSize(() => {
+    const unsubscribeFleet = subscribeFleetIntent(() => {
       socket?.emit("fleet", getFleetSize());
     });
 
